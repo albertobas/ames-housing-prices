@@ -6,7 +6,7 @@
 
 Exploratory data analysis and supervised learning analysis on the Ames Housing Prices dataset in Jupyter notebook format.
 
-For each analysis there is an english and a spanish version.
+For each analysis there is an English and a Spanish version.
 
 ## Requirements
 
