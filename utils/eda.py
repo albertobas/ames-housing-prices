@@ -10,7 +10,7 @@ def plot_univariate(X, value_vars, font_scale, col_wrap, height, aspect, functio
         plot_data.columns = ['predictor', 'count', 'predictor_value']
         plot_data = plot_data.groupby(['predictor', 'predictor_value']).count()
         plot_data['predictor'] = plot_data.index.get_level_values(0)
-        if X.dtypes[value_vars].any() == 'object':
+        if (X.dtypes[value_vars] == 'object').any():
             plot_data['predictor_value'] = plot_data.index.get_level_values(1)
             plot_data = plot_data.sort_values(ascending=False, by="count")
         else:

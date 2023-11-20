@@ -19,7 +19,7 @@ def rmse_cv(estimator, X, y, kfold, raw=False):
     if raw:
         return score
     else:
-        return(score.mean(), score.std())
+        return (score.mean(), score.std())
 
 
 def rmse(y_true, y_pred):
@@ -47,16 +47,21 @@ class BoostingTunerCV():
         combinations = list(itertools.product(*self.param_grid[grid].values()))
         if isinstance(self.estimator, xgb.XGBRegressor):
             dtrain = xgb.DMatrix(X, y)
-            cv = xgb.cv
         elif isinstance(self.estimator, lgb.LGBMRegressor):
             dtrain = lgb.Dataset(X, y)
-            cv = lgb.cv
         for i, values in enumerate(combinations):
             params = self._get_params_to_cv(grid, values)
-            cv_result = cv(params, dtrain, num_boost_round=self.num_boost_round,
-                           folds=kfold_list, metrics=self.metrics,
-                           early_stopping_rounds=self.early_stopping_rounds,
-                           verbose_eval=False)
+            if isinstance(self.estimator, xgb.XGBRegressor):
+                cv_result = xgb.cv(params, dtrain, num_boost_round=self.num_boost_round,
+                                   folds=kfold_list, metrics=self.metrics,
+                                   early_stopping_rounds=self.early_stopping_rounds,
+                                   verbose_eval=False)
+            elif isinstance(self.estimator, lgb.LGBMRegressor):
+                cv_result = lgb.cv(params, dtrain, num_boost_round=self.num_boost_round,
+                                   folds=kfold_list, metrics=self.metrics,
+                                   callbacks=[lgb.early_stopping(
+                                       stopping_rounds=self.early_stopping_rounds, verbose=False)],
+                                   verbose_eval=False)
             if isinstance(cv_result, dict):
                 cv_result = pd.DataFrame.from_dict(cv_result).rename({self.metrics+'-mean': 'test-' +
                                                                       self.metrics+'-mean'}, axis='columns')
@@ -86,6 +91,9 @@ class BoostingTunerCV():
 
     def _get_params_to_cv(self, grid, values):
         params = self.estimator.get_params()
+        if isinstance(self.estimator, lgb.LGBMRegressor):
+            del params['silent']
+            del params['importance_type']
         for i in range(len(values)):
             params[list(self.param_grid.get(grid).keys())[i]] = values[i]
         return params
@@ -160,10 +168,10 @@ class PipeTunerCV():
                     predictions[i, j] = self.estimator.score(
                         X.iloc[holdout_index], y.iloc[holdout_index])
         indexer = predictions.mean(axis=1).argsort()
-        self.metrics_cv_ = predictions[indexer, :][-int(not(self.metrics))]
+        self.metrics_cv_ = predictions[indexer, :][-int(not (self.metrics))]
         index = np.array([param for param in combinations])
         self.best_params_ = dict(
-            zip(self.param_grid.keys(), index[indexer][-int(not(self.metrics))]))
+            zip(self.param_grid.keys(), index[indexer][-int(not (self.metrics))]))
 
     def _set_params(self, parameters):
         params = dict(zip([list(self.estimator.named_steps.keys())[-1]+'__'+param for
