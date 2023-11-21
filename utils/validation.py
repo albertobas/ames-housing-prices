@@ -42,41 +42,38 @@ class BoostingTunerCV():
             self._grid_search_cv(X, y, grid)
             self._set_params(grid)
 
-    def _grid_search_cv(self, X, y, grid):
-        kfold_list = list(self.cv.split(X, y))
-        combinations = list(itertools.product(*self.param_grid[grid].values()))
+    def plot_importance(self, X, y, feature_names, figsize=None, max_num_features=None):
+        if (figsize is None) & (max_num_features is None):
+            figsize = (10, 0.2*(X.shape[1]))
+        elif (figsize is None) & (max_num_features is not None):
+            figsize = (10, 0.5*max_num_features)
         if isinstance(self.estimator, xgb.XGBRegressor):
-            dtrain = xgb.DMatrix(X, y)
+            _, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
+            xgb.plot_importance(xgb.train(params=self.estimator.get_params(),
+                                          dtrain=xgb.DMatrix(
+                                              X, y, feature_names=feature_names),
+                                          num_boost_round=self.estimator.get_params()['n_estimators']),
+                                max_num_features=max_num_features,
+                                title=re.match(
+                                    r'\w+', str(self.estimator))[0] + ' feature importance',
+                                ax=ax)
         elif isinstance(self.estimator, lgb.LGBMRegressor):
-            dtrain = lgb.Dataset(X, y)
-        for i, values in enumerate(combinations):
-            params = self._get_params_to_cv(grid, values)
-            if isinstance(self.estimator, xgb.XGBRegressor):
-                cv_result = xgb.cv(params, dtrain, num_boost_round=self.num_boost_round,
-                                   folds=kfold_list, metrics=self.metrics,
-                                   early_stopping_rounds=self.early_stopping_rounds,
-                                   verbose_eval=False)
-            elif isinstance(self.estimator, lgb.LGBMRegressor):
-                cv_result = lgb.cv(params, dtrain, num_boost_round=self.num_boost_round,
-                                   folds=kfold_list, metrics=self.metrics,
-                                   callbacks=[lgb.early_stopping(
-                                       stopping_rounds=self.early_stopping_rounds, verbose=False)],
-                                   verbose_eval=False)
-            if isinstance(cv_result, dict):
-                cv_result = pd.DataFrame.from_dict(cv_result).rename({self.metrics+'-mean': 'test-' +
-                                                                      self.metrics+'-mean'}, axis='columns')
-            if (i == 0):
-                self._cv_eval(cv_result, values)
-            elif ((cv_result['test-'+self.metrics+'-mean'].min() < self._metrics_mean_min) |
-                  ((cv_result['test-'+self.metrics+'-mean'].min() == self._metrics_mean_min) &
-                   (cv_result.shape[0] < self._n_estimators))):
-                self._cv_eval(cv_result, values)
-        self.cv_result_.index.name = "n_estimators"
-        self.best_params_.update(
-            dict(zip(self.param_grid[grid].keys(), self._best_params)))
-        # set n_estimators once all the parameters are optimized
-        if grid == len(self.param_grid)-1:
-            self.estimator.set_params(n_estimators=self._n_estimators)
+            params = self.estimator.get_params()
+            del params['silent']
+            del params['importance_type']
+            lgb.plot_importance(lgb.train(params,
+                                          train_set=lgb.Dataset(
+                                              X, y, feature_name=feature_names),
+                                          num_boost_round=self.estimator.get_params()[
+                                              'n_estimators']),
+                                figsize=figsize,
+                                max_num_features=max_num_features,
+                                title=re.match(r'\w+', str(self.estimator))[0]+' feature importance')
+        plt.show()
+
+    def plot_learning_curve(self):
+        self.cv_result_.plot(title=re.match(r'\w+', str(self.estimator))[0]+' learning curve',
+                             ylim=[0, 2*self._metrics_mean_min], legend=True)
 
     def _cv_eval(self, cv_result, values):
         self._best_params = values
@@ -98,35 +95,51 @@ class BoostingTunerCV():
             params[list(self.param_grid.get(grid).keys())[i]] = values[i]
         return params
 
+    def _grid_search_cv(self, X, y, grid):
+        kfold_list = list(self.cv.split(X, y))
+        combinations = list(itertools.product(*self.param_grid[grid].values()))
+        if isinstance(self.estimator, xgb.XGBRegressor):
+            dtrain = xgb.DMatrix(X, y)
+        elif isinstance(self.estimator, lgb.LGBMRegressor):
+            dtrain = lgb.Dataset(X, y)
+        for i, values in enumerate(combinations):
+            params = self._get_params_to_cv(grid, values)
+            if isinstance(self.estimator, xgb.XGBRegressor):
+                cv_result = xgb.cv(params,
+                                   dtrain,
+                                   num_boost_round=self.num_boost_round,
+                                   folds=kfold_list,
+                                   metrics=self.metrics,
+                                   early_stopping_rounds=self.early_stopping_rounds,
+                                   verbose_eval=False)
+            elif isinstance(self.estimator, lgb.LGBMRegressor):
+                cv_result = lgb.cv(params,
+                                   dtrain,
+                                   num_boost_round=self.num_boost_round,
+                                   folds=kfold_list,
+                                   metrics=self.metrics,
+                                   callbacks=[lgb.early_stopping(
+                                       stopping_rounds=self.early_stopping_rounds, verbose=False)],
+                                   verbose_eval=False)
+            if isinstance(cv_result, dict):
+                cv_result = pd.DataFrame.from_dict(cv_result).rename({self.metrics+'-mean': 'test-' +
+                                                                      self.metrics+'-mean'}, axis='columns')
+            if (i == 0):
+                self._cv_eval(cv_result, values)
+            elif ((cv_result['test-'+self.metrics+'-mean'].min() < self._metrics_mean_min) |
+                  ((cv_result['test-'+self.metrics+'-mean'].min() == self._metrics_mean_min) &
+                   (cv_result.shape[0] < self._n_estimators))):
+                self._cv_eval(cv_result, values)
+        self.cv_result_.index.name = "n_estimators"
+        self.best_params_.update(
+            dict(zip(self.param_grid[grid].keys(), self._best_params)))
+        # set n_estimators once all the parameters are optimized
+        if grid == len(self.param_grid)-1:
+            self.estimator.set_params(n_estimators=self._n_estimators)
+
     def _set_params(self, grid):
         for k in self.param_grid[grid].keys():
             setattr(self.estimator.set_params(), k, self.best_params_[k])
-
-    def plot_importance(self, X, y, feature_names, figsize=None, max_num_features=None):
-        if (figsize is None) & (max_num_features is None):
-            figsize = (10, 0.2*(X.shape[1]))
-        elif (figsize is None) & (max_num_features is not None):
-            figsize = (10, 0.5*max_num_features)
-        if isinstance(self.estimator, xgb.XGBRegressor):
-            _, ax = plt.subplots(nrows=1, ncols=1, figsize=figsize)
-            xgb.plot_importance(xgb.train(params=self.estimator.get_params(),
-                                          dtrain=xgb.DMatrix(
-                                              X, y, feature_names=feature_names),
-                                          num_boost_round=self.estimator.get_params()['n_estimators']),
-                                max_num_features=max_num_features, title=re.match(r'\w+', str(self.estimator))[0] +
-                                ' feature importance', ax=ax)
-        elif isinstance(self.estimator, lgb.LGBMRegressor):
-            lgb.plot_importance(lgb.train(params=self.estimator.get_params(),
-                                          train_set=lgb.Dataset(
-                                              X, y, feature_name=feature_names),
-                                          num_boost_round=self.estimator.get_params()['n_estimators']),
-                                figsize=figsize, max_num_features=max_num_features,
-                                title=re.match(r'\w+', str(self.estimator))[0]+' feature importance')
-        plt.show()
-
-    def plot_learning_curve(self):
-        self.cv_result_.plot(title=re.match(r'\w+', str(self.estimator))[0]+' learning curve',
-                             ylim=[0, 2*self._metrics_mean_min], legend=True)
 
 
 class PipeTunerCV():
